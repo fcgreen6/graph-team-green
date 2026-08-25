@@ -309,7 +309,7 @@ This approach significantly improved **runtime efficiency** and ensured correctn
 
 These improvements ensured a **smooth user experience**, even when visualizing large graphs.
 
-###**Team Peer Review**
+### **Team Peer Review**
 - Joyce Tang 10 points
 - Fletcher Green 10 points
 
