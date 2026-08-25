@@ -1,0 +1,22 @@
+{
+  "name": "graph-team-green",
+  "version": "1.0.0",
+  "description": "Processing a BigData Graph with a third party library.",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "graph-team-green"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cytoscape": "^3.31.1",
+    "electron": "^34.3.0",
+    "graphlib": "^2.1.8",
+    "open": "^10.1.0",
+    "ws": "^8.18.1"
+  }
+}

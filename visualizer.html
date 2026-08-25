@@ -1,0 +1,253 @@
+<!-- -------------------------------------------------------------------------------------------------
+  File: visualizer.html
+  Description: 
+  - This file is responsible for rendering the graph visualization in the Electron application.
+  - It uses Cytoscape.js for graph rendering and listens to events from `main.js` via `preload.js`.
+  - Supports both Graph Mode (`-g`) and Shortest Path Mode (`-p`) by dynamically updating the legend.
+-------------------------------------------------------------------------------------------------- -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Graph Visualization</title>
+    <script src="https://unpkg.com/cytoscape@3.24.0/dist/cytoscape.min.js"></script>
+    <style>
+        /* Basic styling for the body and legend */
+        body { margin: 0; font-family: Arial, sans-serif; }
+        #legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border: 1px solid #ccc;
+            z-index: 10;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px; 
+        }
+        #legend div {
+            display: inline-block;
+            margin-right: 20px;
+            line-height: 18px;
+        }
+        .color-box {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin-right: 5px;
+            vertical-align: middle;
+            border: 1px solid #000;
+            border-radius: 30%;
+        }
+        #cy {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <!-- Legend for the graph visualization -->
+    <div id="legend">
+        <div id="legend-longest" style="display:none;">
+            <span class="color-box" style="background-color: #097969;"></span> Existing Node 
+            <span class="color-box" style="background-color: #88e788;"></span> Recently Added Node 
+            <span class="color-box" style="background-color: #BF0A30;"></span> Most Central Node 
+            <span class="color-box" style="background-color: #0292C2;"></span> Longest Path 
+        </div>
+        <div id="legend-shortest" style="display:none;">
+            <span class="color-box" style="background-color: #0292C2;"></span> Shortest Path
+        </div>
+    </div>
+     
+    <!-- Container for the Cytoscape graph -->
+    <div id="cy"></div>
+    <script>
+        // Initialize Cytoscape with basic styles and layout
+        const cy = cytoscape({
+            container: document.getElementById('cy'),
+            style: [
+                {
+                    // Default node and edge styles
+                    selector: 'node',
+                    style: {
+                        'background-color': '#097969',
+                        'label': 'data(id)',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'color': '#fff',
+                        'text-outline-color': '#097969',
+                        'text-outline-width': 0.5,
+                        'width': 20,
+                        'height': 20,
+                        'font-size': '7px'
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'line-color': '#808588',
+                        'width': 1,
+                        'curve-style': 'bezier',
+                        'target-arrow-color': '#808588',
+                        'target-arrow-shape': 'triangle',
+                        'arrow-scale': 0.5
+                    }
+                }
+            ],
+            // Default layout settings
+            layout: {
+                name: 'cose',
+                nodeSpacing: 20,
+                idealEdgeLength: 50,
+                animate: true
+            }
+        });
+
+        // Tracks nodes that have been manually painted and must not be reset
+        const permanentlyColoredNodes = new Set();
+
+        // Tracks the most recent batch of newly added nodes
+        let mostRecentNodes = new Set();
+
+        // onGraphLayer Event Listener:
+        // Purpose: Handles the addition of new nodes and edges to the Cytoscape graph visualization.
+        //          This function processes incoming graph data and updates the visualization accordingly.
+        // Parameters:
+        // - newNodes: An array of newly added nodes to the graph.
+        // - newEdges: An array of newly added edges connecting nodes in the graph.
+        window.electronAPI.onGraphLayer(({ newNodes: incomingNodes, newEdges }) => {
+            const elements = [];
+
+            // Reset the "most recent nodes" — new layer arriving
+            mostRecentNodes = new Set(incomingNodes);
+
+            // Add new nodes
+            incomingNodes.forEach(node => {
+                if (!cy.getElementById(node).length) {
+                    elements.push({
+                        group: 'nodes',
+                        data: { id: node },
+                        style: { opacity: 0 }  // Start fully invisible
+                    });
+                }
+            });
+            // Add new edges
+            newEdges.forEach(edge => {
+                // Edge ID is a combination of source and target node IDs
+                const edgeId = `${edge.v}->${edge.w}`;
+                // Check if edge already exists
+                if (!cy.getElementById(edgeId).length) {
+                    elements.push({
+                        // Edges are added to the 'edges' group
+                        group: 'edges',
+                        data: { id: edgeId, source: edge.v, target: edge.w }
+                    });
+                }
+            });
+
+            // Add elements to Cytoscape instance
+            cy.add(elements);
+            // Run layout and fit graph to screen
+            cy.layout({ name: 'cose', nodeSpacing: 20, idealEdgeLength: 50, animate: true }).run();
+            cy.fit();
+
+            // Animate new nodes to fade in
+            mostRecentNodes.forEach(nodeId => {
+                const node = cy.getElementById(nodeId);
+                node.animate({
+                    style: { opacity: 1 },
+                    duration: 1000  // 1 second fade-in
+                });
+
+                // Set correct color (light green)
+                node.style('background-color', '#88e788');
+            });
+
+            // Now reset colors for older existing nodes
+            cy.nodes().forEach(node => {
+                const id = node.id();
+
+                if (permanentlyColoredNodes.has(id)) {
+                    return;  // Leave manually painted nodes alone
+                }
+
+                if (!mostRecentNodes.has(id)) {
+                    node.style('background-color', '#097969');  // Older nodes turn dark green
+                }
+            });
+        });
+
+        // onPaintNode Event Listener:
+        // Purpose: Handles requests to change the color of a specific node in the graph.
+        //          This function highlights individual nodes for special significance.
+        //
+        // Parameters:
+        // - nodeId: The unique identifier of the node to be painted.
+        // - color: The color to apply to the specified node.
+        //
+        window.electronAPI.onPaintNode(({ nodeId, color }) => {
+            const node = cy.getElementById(nodeId);
+            if (node) {
+                node.style({
+                    'background-color': color,
+                    'z-compound-depth': 'top',  // Keep manually painted nodes above others
+                });
+                permanentlyColoredNodes.add(nodeId);
+                mostRecentNodes.delete(nodeId);  // If manually painted, not "recent" anymore
+            }
+        });
+
+        // onPaintPath Event Listener:
+        // Purpose: Handles requests to change the color of a sequence of nodes and edges,
+        //          visually representing a path in the graph (e.g., longest or shortest path).
+        //
+        // Parameters:
+        // - path: An ordered array of node IDs representing the path sequence.
+        // - color: The color to apply to all nodes and edges in the path.
+        //
+        window.electronAPI.onPaintPath(({ path, color }) => {
+            for (let i = 0; i < path.length; i++) {
+                const node = cy.getElementById(path[i]);
+                if (node) {
+                    node.style({
+                        'background-color': color,
+                        'z-compound-depth': 'top'
+                    });
+                }
+
+                if (i < path.length - 1) {
+                    const edgeId = `${path[i]}->${path[i+1]}`;
+                    const edge = cy.getElementById(edgeId);
+                    if (edge) {
+                        edge.style({
+                            'line-color': color,
+                            'target-arrow-color': color,
+                            'width': 2,
+                            'z-compound-depth': 'top'
+                        });
+                    }
+                }
+            }
+        });
+
+        // onSetMode Event Listener:
+        // Purpose: Controls the visibility of the legend based on the graph mode.
+        //          The legend updates dynamically to indicate whether the user is viewing 
+        //          a general graph (`-g` mode) or a shortest path visualization (`-p` mode).
+        //
+        // Parameters:
+        // - mode: A string indicating the mode ('graph' for general graph, 'shortest-path' for path visualization).
+        //
+        window.electronAPI.onSetMode((mode) => {
+            if (mode === 'graph') {
+                document.getElementById('legend-longest').style.display = 'block';
+                document.getElementById('legend-shortest').style.display = 'none';
+            } else if (mode === 'shortest-path') {
+                document.getElementById('legend-longest').style.display = 'none';
+                document.getElementById('legend-shortest').style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
